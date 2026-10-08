@@ -1,0 +1,437 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum DayOfWeek {
+  SATURDAY
+  SUNDAY
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum SenderType {
+  USER
+  AI
+  ADMIN
+}
+
+// ==========================================
+// BETTER AUTH MODELS (Untouched standard schema)
+// ==========================================
+
+model User {
+  id             String            @id
+  name           String
+  email          String            @unique
+  emailVerified  Boolean           @default(false)
+  image          String?
+  role           String?           @default("PATIENT")
+  sessions       Session[]
+  accounts       Account[]
+  profile        UserProfile?
+  doctorProfile  Doctor?
+  appointments   Appointment[]
+  favourites     DoctorFavourite[]
+  supportTickets SupportTicket[]
+  aiChatSessions AiChatSession[]
+  ticketMessages TicketMessage[]
+  blogs          Blog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  banned     Boolean?  @default(false)
+  banReason  String?
+  banExpires DateTime?
+
+  @@index([role])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  impersonatedBy String?
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ==========================================
+// TELEHEALTH BUSINESS MODELS
+// ==========================================
+
+model UserProfile {
+  id        String    @id @default(uuid())
+  userId    String    @unique
+  phone     String?   @unique
+  gender    Gender?
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_profile")
+}
+
+model BlogCategory {
+  id          String   @id @default(uuid())
+  name        String   @unique // e.g., "Cardiology", "Mental Health"
+  slug        String   @unique // e.g., "cardiology", "mental-health"
+  description String?
+  createdAt   DateTime @default(now())
+
+  blogs Blog[]
+
+  @@map("blog_category")
+}
+
+model Blog {
+  id          String    @id @default(uuid())
+  userId      String
+  categoryId  String
+  title       String
+  slug        String    @unique
+  content     String    @db.Text
+  coverImage  String?
+  isPublished Boolean   @default(false)
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  author   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category BlogCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([slug])
+  @@map("blog")
+}
+
+model Specialization {
+  id          String                 @id @default(uuid())
+  name        String                 @unique
+  description String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime
+  doctors     DoctorSpecialization[]
+
+  @@map("specialization")
+}
+
+model DoctorSpecialization {
+  doctorId         String
+  specializationId String
+  doctor           Doctor         @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  specialization   Specialization @relation(fields: [specializationId], references: [id], onDelete: Cascade)
+
+  @@id([doctorId, specializationId])
+  @@map("doctor_specialization")
+}
+
+model Clinic {
+  id        String    @id @default(uuid())
+  name      String
+  address   String
+  city      String    @default("Dhaka")
+  phone     String?
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  schedules DoctorSchedule[]
+
+  @@map("clinic")
+}
+
+model Doctor {
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  bmdcRegNo       String    @unique
+  consultationFee Decimal   @db.Decimal(10, 2)
+  experienceYears Int
+  bio             String?
+  isVerified      Boolean   @default(false)
+  deletedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specializations DoctorSpecialization[]
+  schedules       DoctorSchedule[]
+  appointments    Appointment[]
+  favouritedBy    DoctorFavourite[]
+
+  @@index([bmdcRegNo])
+  @@map("doctor")
+}
+
+model DoctorSchedule {
+  id           String    @id @default(uuid())
+  doctorId     String
+  clinicId     String
+  dayOfWeek    DayOfWeek
+  startTime    String
+  endTime      String
+  slotDuration Int       @default(30)
+  isAvailable  Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+
+  doctor       Doctor        @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  clinic       Clinic        @relation(fields: [clinicId], references: [id], onDelete: Restrict)
+  appointments Appointment[]
+
+  @@index([doctorId, dayOfWeek])
+  @@map("doctor_schedule")
+}
+
+model Appointment {
+  id              String            @id @default(uuid())
+  patientId       String
+  doctorId        String
+  scheduleId      String
+  appointmentDate DateTime          @db.Date
+  startTime       String
+  status          AppointmentStatus @default(PENDING)
+  notes           String?
+  deletedAt       DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  patient      User           @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctor       Doctor         @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  schedule     DoctorSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+  payment      Payment?
+  prescription Prescription?
+
+  @@index([doctorId, appointmentDate])
+  @@index([patientId])
+  @@map("appointment")
+}
+
+model Payment {
+  id            String        @id @default(uuid())
+  appointmentId String        @unique
+  amount        Decimal       @db.Decimal(10, 2)
+  gatewayTxnId  String?       @unique
+  gatewayName   String
+  status        PaymentStatus @default(PENDING)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@map("payment")
+}
+
+model Medicine {
+  id           String   @id @default(uuid())
+  brandName    String?
+  genericName  String
+  manufacturer String?
+  strength     String? // e.g., "500mg"
+  form         String? // e.g., "Tablet", "Syrup", "Capsule"
+  createdAt    DateTime @default(now())
+
+  prescriptionItems PrescriptionItem[]
+
+  @@index([brandName])
+  @@index([genericName])
+  @@map("medicine")
+}
+
+model DiagnosticTest {
+  id          String   @id @default(uuid())
+  name        String   @unique // e.g., "Complete Blood Count (CBC)", "FBS"
+  category    String? // e.g., "Pathology", "Imaging"
+  description String?
+  createdAt   DateTime @default(now())
+
+  @@map("diagnostic_test")
+}
+
+model Prescription {
+  id            String   @id @default(uuid())
+  appointmentId String   @unique
+  diagnosis     String
+  advice        String?
+  createdAt     DateTime @default(now())
+
+  appointment Appointment        @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  items       PrescriptionItem[]
+
+  @@map("prescription")
+}
+
+model PrescriptionItem {
+  id             String  @id @default(uuid())
+  prescriptionId String
+  medicineName   String
+  dosage         String
+  duration       String
+  instructions   String?
+  medicineId     String?
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medicine     Medicine?    @relation(fields: [medicineId], references: [id], onDelete: SetNull)
+
+  @@map("prescription_item")
+}
+
+model DoctorFavourite {
+  patientId String
+  doctorId  String
+  createdAt DateTime @default(now())
+
+  patient User   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor  Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@id([patientId, doctorId])
+  @@map("doctor_favourite")
+}
+
+model SupportTicket {
+  id        String         @id @default(uuid())
+  userId    String
+  subject   String
+  status    TicketStatus   @default(OPEN)
+  priority  TicketPriority @default(MEDIUM)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages TicketMessage[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("support_ticket")
+}
+
+model TicketMessage {
+  id        String   @id @default(uuid())
+  ticketId  String
+  userId    String
+  message   String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@map("ticket_message")
+}
+
+model AiChatSession {
+  id        String   @id @default(uuid())
+  userId    String?
+  title     String   @default("New Chat")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages AiChatMessage[]
+
+  @@index([userId])
+  @@map("ai_chat_session")
+}
+
+model AiChatMessage {
+  id        String     @id @default(uuid())
+  sessionId String
+  sender    SenderType
+  message   String     @db.Text
+  createdAt DateTime   @default(now())
+
+  session AiChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("ai_chat_message")
+}
